@@ -257,7 +257,8 @@ MK_LCD ver 3.0 library by Miroslaw Kardas ([ATNEL](https://atnel.pl)) -
 originally written for AVR microcontrollers, ported to ESPHome C++ component.
 
 ## License
-
+---
 MIT
-
+---
+ 
  
