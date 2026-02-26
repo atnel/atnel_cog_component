@@ -43,13 +43,13 @@ RST  -------------- GPIO (optional, directly to VCC if not used)
 
 ### Local component
 
-Copy the `components/atnel_cog_2x16_st7032` folder into your ESPHome project directory:
+Copy the `components/atnel_cog_2x16` folder into your ESPHome project directory:
 
 ```
 your_project/
   your_config.yaml
   components/
-    atnel_cog_2x16_st7032/
+    atnel_cog_2x16/
       __init__.py
       display.py
       atnel_cog_2x16_st7032.h
@@ -71,7 +71,7 @@ external_components:
 external_components:
   - source:
       type: git
-      url: https://github.com/atnel/atnel_cog_component
+      url: https://github.com/atnel/atnel_cog_2x16
       ref: main
 ```
 
@@ -79,7 +79,7 @@ external_components:
 
 ```yaml
 display:
-  - platform: atnel_cog_2x16_st7032
+  - platform: atnel_cog_2x16
     id: my_lcd
     address: 0x3E            # default, can be omitted
     contrast: 32             # 0-63, default 32
@@ -197,48 +197,32 @@ external_components:
       type: local
       path: components
 
-sensor:
-  - platform: uptime
-    id: uptime_sec
-    update_interval: 1s
-    internal: true
-
-  - platform: wifi_signal
-    id: wifi_rssi
-    update_interval: 10s
-    internal: true
-
 time:
   - platform: sntp
-    id: my_time
+    id: sntp_time
     timezone: Europe/Warsaw
 
 display:
   - platform: atnel_cog_2x16_st7032
-    id: my_lcd
+    id: my_cog_lcd
     address: 0x3E
     contrast: 32
+    columns: 16
+    rows: 2
     update_interval: 1s
     user_characters:
-      - position: 1
+      - position: 1               # degree symbol
         data: [0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00]
-      - position: 2
-        data: [0x00, 0x0E, 0x04, 0x04, 0x04, 0x04, 0x0E, 0x04]
     lambda: |-
-      // Line 0: clock + WiFi signal
-      if( id(my_time).now().is_valid() ) {
-        it.strftime(0, 0, "%H:%M:%S", id(my_time).now());
+      // Line 0: time (no seconds) + date
+      if( id(sntp_time).now().is_valid() ) {
+        it.strftime(0, 0, "%H:%M", id(sntp_time).now());
+        it.strftime(6, 0, "%d.%m.%Y", id(sntp_time).now());
       } else {
-        it.print(0, 0, "--:--:--");
+        it.print(0, 0, "--:--  --.--.----");
       }
-      it.printf(10, 0, "\x02%3.0f", id(wifi_rssi).state);
-
-      // Line 1: uptime
-      int sec = (int)id(uptime_sec).state;
-      int hr = sec / 3600;
-      int mn = (sec % 3600) / 60;
-      int sc = sec % 60;
-      it.printf(0, 1, "Up: %02d:%02d:%02d", hr, mn, sc);
+      // Line 1: ST7032 + temperature with degree symbol (user char \x01)
+      it.printf(0, 1, "ST7032    21.5\x01C");
 ```
 
 ## Technical Notes
