@@ -43,13 +43,13 @@ RST  -------------- GPIO (optional, directly to VCC if not used)
 
 ### Local component
 
-Copy the `components/atnel_cog_2x16` folder into your ESPHome project directory:
+Copy the `components/atnel_cog_2x16_st7032` folder into your ESPHome project directory:
 
 ```
 your_project/
   your_config.yaml
   components/
-    atnel_cog_2x16/
+    atnel_cog_2x16_st7032/
       __init__.py
       display.py
       atnel_cog_2x16_st7032.h
@@ -71,7 +71,7 @@ external_components:
 external_components:
   - source:
       type: git
-      url: https://github.com/atnel/atnel_cog_2x16
+      url: https://github.com/atnel/atnel_cog_component
       ref: main
 ```
 
@@ -79,7 +79,7 @@ external_components:
 
 ```yaml
 display:
-  - platform: atnel_cog_2x16
+  - platform: atnel_cog_2x16_st7032
     id: my_lcd
     address: 0x3E            # default, can be omitted
     contrast: 32             # 0-63, default 32
@@ -88,7 +88,7 @@ display:
     update_interval: 1s      # how often lambda is called
     reset_pin: GPIO16        # optional - only if RST pin is connected
     user_characters:         # optional - up to 8 custom chars
-      - position: 1
+      - position: 0
         data: [0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00]
     lambda: |-
       it.print(0, 0, "Hello World!");
@@ -123,6 +123,16 @@ it.strftime("%H:%M:%S", id(my_time).now()); // time formatting
 it.strftime(0, 0, "%H:%M", id(my_time).now());
 ```
 
+**Cursor continuation** - `print()` without coordinates continues from where
+the previous call left off. This allows building output step by step:
+
+```cpp
+it.print(0, 1, "Temp:");
+it.print(" 21.5");           // continues right after "Temp:"
+it.print("\x80");            // degree symbol (CGRAM pos 0)
+it.print("C");               // final "C"
+```
+
 ### Display Control
 
 ```cpp
@@ -137,7 +147,7 @@ it.blink_off();              // stop blinking
 it.set_contrast_value(40);   // change contrast at runtime (0-63)
 ```
 
-## User-Defined Characters
+## User-Defined Characters (CGRAM)
 
 Up to 8 custom characters (positions 0-7). Each character is 5x8 pixels,
 defined as 8 bytes where lower 5 bits represent pixel columns.
@@ -146,52 +156,60 @@ defined as 8 bytes where lower 5 bits represent pixel columns.
 
 ```yaml
 user_characters:
-  - position: 1                # degree symbol
+  - position: 0                # degree symbol
     data: [0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00]
-  - position: 2                # thermometer
+  - position: 1                # thermometer
     data: [0x04, 0x0A, 0x0A, 0x0E, 0x0E, 0x1F, 0x1F, 0x0E]
-  - position: 3                # antenna
+  - position: 2                # antenna
     data: [0x00, 0x0E, 0x04, 0x04, 0x04, 0x04, 0x0E, 0x04]
-  - position: 4                # droplet (humidity)
+  - position: 3                # droplet (humidity)
     data: [0x04, 0x04, 0x0A, 0x0A, 0x11, 0x11, 0x11, 0x0E]
 ```
 
-### Using in Lambda
+### CGRAM Address Mapping (0x80 - 0x87)
 
-Characters at positions 1-7 are referenced directly as `\x01` through `\x07`.
-Position 0 uses `\x08` (remapped internally to avoid null terminator in C strings).
+In C/C++ strings, byte value `0x00` acts as a null terminator and cuts the
+string short. This component uses an original remapping technique from the
+MK_LCD library by ATNEL to solve this problem elegantly:
+
+**CGRAM characters are addressed using codes `0x80` - `0x87` in strings,
+which the driver automatically remaps to hardware CGRAM positions 0 - 7.**
+
+| CGRAM Position | Code in string | Note                                   |
+|----------------|----------------|----------------------------------------|
+| 0              | `\x80`         | MUST use 0x80 (0x00 = null terminator) |
+| 1              | `\x81`         | or simply `\x01`                       |
+| 2              | `\x82`         | or simply `\x02`                       |
+| 3              | `\x83`         | or simply `\x03`                       |
+| 4              | `\x84`         | or simply `\x04`                       |
+| 5              | `\x85`         | or simply `\x05`                       |
+| 6              | `\x86`         | or simply `\x06`                       |
+| 7              | `\x87`         | or simply `\x07`                       |
+
+Positions 1-7 can use either the short form (`\x01` - `\x07`) or the mapped
+form (`\x81` - `\x87`). Position 0 **must** use `\x80`.
+
+**Important:** When a hex escape like `\x01` is followed by a valid hex
+character (a-f, A-F, 0-9), C++ treats them as one escape sequence.
+For example `\x01C` becomes byte `0x1C` (not char 1 + letter C).
+Always split the string in such cases:
 
 ```cpp
-it.printf(0, 0, "\x02 %.1f\x01C", id(temp).state);    // thermometer + degree
-it.printf(0, 1, "\x04 %.0f%%", id(hum).state);         // droplet + humidity
+it.printf(0, 0, "21.5\x80" "C");   // correct: degree (pos 0) + letter C
+it.printf(0, 0, "21.5\x80C");      // WRONG: 0x80C is not what you want!
+```
+
+The safest universal approach - use `0x80`-`0x87` range and split before
+any hex-valid letter (A-F, a-f, 0-9):
+
+```cpp
+it.printf(0, 0, "\x81 21.5\x80" "C");    // thermometer + temp + degree + C
+it.printf(0, 1, "\x83 65%%");             // droplet + humidity (safe, % is not hex)
 ```
 
 ## Complete Example
 
 ```yaml
-esphome:
-  name: my-cog-display
-
-esp8266:
-  board: d1_mini
-
-wifi:
-  ssid: "MyNetwork"
-  password: "MyPassword"
-
-logger:
-  level: DEBUG
-
-api:
-ota:
-  platform: esphome
-
-i2c:
-  sda: GPIO4
-  scl: GPIO5
-  frequency: 400kHz
-  scan: true
-
 external_components:
   - source:
       type: local
@@ -211,18 +229,18 @@ display:
     rows: 2
     update_interval: 1s
     user_characters:
-      - position: 1               # degree symbol
+      - position: 0               # degree symbol
         data: [0x06, 0x09, 0x09, 0x06, 0x00, 0x00, 0x00, 0x00]
     lambda: |-
-      // Line 0: time (no seconds) + date
+      // Line 0: time + date
       if( id(sntp_time).now().is_valid() ) {
         it.strftime(0, 0, "%H:%M", id(sntp_time).now());
         it.strftime(6, 0, "%d.%m.%Y", id(sntp_time).now());
       } else {
         it.print(0, 0, "--:--  --.--.----");
       }
-      // Line 1: ST7032 + temperature with degree symbol (user char \x01)
-      it.printf(0, 1, "ST7032    21.5\x01C");
+      // Line 1: label + temperature with degree symbol
+      it.printf(0, 1, "ST7032    21.5\x80" "C");
 ```
 
 ## Technical Notes
