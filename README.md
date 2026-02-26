@@ -259,5 +259,5 @@ originally written for AVR microcontrollers, ported to ESPHome C++ component.
 ## License
 
 MIT
- 
+
  
